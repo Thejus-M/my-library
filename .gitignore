@@ -1,0 +1,7 @@
+node_modules/
+cache/
+.trash/
+trash.json
+watch-progress.json
+config.json
+overrides.json

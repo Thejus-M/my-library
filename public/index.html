@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My Library</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">My Library</div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="movies">Movies</button>
+      <button class="tab" data-tab="series">Series</button>
+    </nav>
+    <div class="topbar-actions">
+      <button id="trashBtn" class="icon-btn" title="Trash" aria-label="Trash"></button>
+      <button id="rescanBtn" class="icon-btn" title="Rescan library" aria-label="Rescan library"></button>
+      <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings"></button>
+    </div>
+  </header>
+
+  <main id="app">
+    <div id="loading" class="skeleton-grid">
+      <div class="skeleton-card"></div><div class="skeleton-card"></div>
+      <div class="skeleton-card"></div><div class="skeleton-card"></div>
+      <div class="skeleton-card"></div><div class="skeleton-card"></div>
+    </div>
+
+    <section id="moviesView" class="tab-view">
+      <div class="hero" id="moviesHero" hidden></div>
+      <div class="row-title">Movies</div>
+      <div class="grid" id="moviesGrid"></div>
+    </section>
+
+    <section id="seriesView" class="tab-view" hidden>
+      <div class="hero" id="seriesHero" hidden></div>
+      <div class="row-title">Series</div>
+      <div class="grid" id="seriesGrid"></div>
+    </section>
+  </main>
+
+  <!-- Detail overlay: shared by movies and series -->
+  <div id="detailView" class="detail-overlay" hidden>
+    <button class="back-btn" id="backFromDetail"></button>
+    <div class="detail-backdrop" id="detailBackdrop">
+      <div class="detail-backdrop-img" id="detailBackdropImg"></div>
+    </div>
+    <div class="detail-content">
+      <img id="detailPoster" class="detail-poster" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" />
+      <div class="detail-info">
+        <h1 id="detailTitle"></h1>
+        <p class="detail-tagline" id="detailTagline" hidden></p>
+        <div class="detail-meta" id="detailMeta"></div>
+        <p class="detail-overview" id="detailOverview"></p>
+        <div class="detail-actions">
+          <button class="play-btn" id="detailPlayBtn" hidden></button>
+          <button class="pill-btn secondary" id="detailTrailerBtn" hidden></button>
+          <button class="pill-btn secondary" id="detailEditBtn"></button>
+          <button class="pill-btn secondary" id="detailDeleteBtn" hidden></button>
+        </div>
+      </div>
+    </div>
+    <div id="detailSeasons" class="detail-seasons"></div>
+  </div>
+
+  <!-- Trash overlay -->
+  <div id="trashView" class="detail-overlay" hidden>
+    <button class="back-btn" id="backFromTrash"></button>
+    <div class="trash-header">
+      <h1>Trash</h1>
+      <button class="pill-btn secondary" id="emptyTrashBtn"></button>
+    </div>
+    <div id="trashList" class="trash-list"></div>
+  </div>
+
+  <div id="episodeEditModal" class="modal" hidden>
+    <div class="modal-box">
+      <h2>Fix episode number</h2>
+      <p class="hint">If TMDB numbers this episode differently than the filename does, enter the correct season and episode to fetch its real title, overview, and still.</p>
+      <label>Season</label>
+      <input id="episodeSeasonInput" type="number" min="0" />
+      <label>Episode</label>
+      <input id="episodeNumberInput" type="number" min="0" />
+      <div class="modal-actions">
+        <button id="closeEpisodeEdit">Cancel</button>
+        <button id="saveEpisodeEdit" class="primary">Save &amp; Rescan</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editModal" class="modal" hidden>
+    <div class="modal-box">
+      <h2>Fix match</h2>
+      <p class="hint">Wrong or missing poster or details? Correct the title (and year, for movies) to re-match on TMDB. Still no match? Fill in a poster URL and overview yourself below.</p>
+      <label>Search title</label>
+      <input id="editTitleInput" type="text" />
+      <label id="editYearLabel">Year</label>
+      <input id="editYearInput" type="number" />
+      <label>Manual poster URL (fallback only)</label>
+      <input id="editPosterInput" type="text" placeholder="https://..." />
+      <label>Manual overview (fallback only)</label>
+      <input id="editOverviewInput" type="text" placeholder="plot summary" />
+      <div class="modal-actions">
+        <button id="closeEdit">Cancel</button>
+        <button id="saveEdit" class="primary">Save &amp; Rescan</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal" hidden>
+    <div class="modal-box">
+      <h2>Settings</h2>
+      <label>TMDB API key</label>
+      <input id="tmdbKeyInput" type="text" placeholder="paste TMDB v3 API key" />
+      <p class="hint">Get a free key at
+        <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>
+      </p>
+      <label>Movies folder</label>
+      <input id="moviesPathInput" type="text" />
+      <label>Series folder</label>
+      <input id="seriesPathInput" type="text" />
+      <div class="modal-actions">
+        <button id="closeSettings">Cancel</button>
+        <button id="saveSettings" class="primary">Save &amp; Rescan</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "kodi-replacement",
+  "version": "1.0.0",
+  "description": "Local Netflix-style gallery for your movies and series, plays via VLC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
