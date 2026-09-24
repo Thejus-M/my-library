@@ -51,28 +51,62 @@ function showToast(message) {
 const MODAL_TRANSITION_MS = 180;
 function openModal(modalEl) {
   modalEl.hidden = false;
-  requestAnimationFrame(() => modalEl.classList.add('modal-visible'));
+  requestAnimationFrame(() => {
+    modalEl.classList.add('modal-visible');
+    const focusable = modalEl.querySelector('input, button, [tabindex]');
+    if (focusable) focusable.focus();
+  });
 }
 function closeModal(modalEl) {
   modalEl.classList.remove('modal-visible');
   setTimeout(() => { modalEl.hidden = true; }, MODAL_TRANSITION_MS);
 }
 
+// Click on the backdrop (outside the modal box) or press Escape to dismiss -
+// whichever of modal / detail view / trash view is currently open.
+function setupModalDismissal() {
+  document.querySelectorAll('.modal').forEach((modalEl) => {
+    modalEl.addEventListener('click', (e) => {
+      if (e.target === modalEl) closeModal(modalEl);
+    });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const openModalEl = document.querySelector('.modal.modal-visible');
+    if (openModalEl) { closeModal(openModalEl); return; }
+    if (!el('detailView').hidden) { closeDetail(); return; }
+    if (!el('trashView').hidden) closeTrashView();
+  });
+}
+
 async function fetchLibrary() {
   el('loading').hidden = false;
+  el('loadError').hidden = true;
   el('moviesView').hidden = true;
   el('seriesView').hidden = true;
-  const [libRes, progressRes] = await Promise.all([
-    fetch('/api/library'),
-    fetch('/api/progress').catch(() => null)
-  ]);
-  const data = await libRes.json();
-  state.movies = data.movies;
-  state.series = data.series;
-  state.tmdbConfigured = data.tmdbConfigured;
-  state.progress = progressRes ? await progressRes.json().catch(() => ({})) : {};
-  el('loading').hidden = true;
-  renderActiveTab();
+  try {
+    const [libRes, progressRes] = await Promise.all([
+      fetch('/api/library'),
+      fetch('/api/progress').catch(() => null)
+    ]);
+    if (!libRes.ok) {
+      const body = await libRes.json().catch(() => ({}));
+      throw new Error(body.error || `Server returned ${libRes.status}`);
+    }
+    const data = await libRes.json();
+    state.movies = data.movies;
+    state.series = data.series;
+    state.tmdbConfigured = data.tmdbConfigured;
+    state.progress = progressRes ? await progressRes.json().catch(() => ({})) : {};
+    el('loading').hidden = true;
+    renderActiveTab();
+  } catch (err) {
+    // Server unreachable or scan failed - show a real error state with a
+    // retry action instead of leaving the loading skeleton spinning forever.
+    el('loading').hidden = true;
+    el('loadErrorMessage').textContent = `Could not load your library: ${err.message}`;
+    el('loadError').hidden = false;
+  }
 }
 
 function escapeHtml(str) {
@@ -164,7 +198,7 @@ function renderMovies() {
 
 function renderSeries() {
   const hero = state.series.find((s) => s.backdropUrl) || state.series[0];
-  renderHero(el('seriesHero'), hero, (s) => playFirstEpisode(s), (s) => openSeriesDetail(s));
+  renderHero(el('seriesHero'), hero, (s) => playNextEpisode(s), (s) => openSeriesDetail(s));
 
   const grid = el('seriesGrid');
   if (!state.series.length) {
@@ -247,11 +281,14 @@ function openDetailShell(item) {
 
 // Play button reads "Resume" and starts partway through when there's saved
 // progress that isn't already marked watched; otherwise it's a plain Play.
-function setPlayButton(filePath) {
+// episodeLabel (e.g. "S2 E04") is appended for series so the continue-watching
+// jump target is visible before you click, tvOS-style.
+function setPlayButton(filePath, episodeLabel) {
   const playBtn = el('detailPlayBtn');
   const p = state.progress[filePath];
   const resumeAt = p && !p.watched && p.position > 5 ? p.position : null;
-  playBtn.innerHTML = resumeAt ? `${icon('play')}Resume` : `${icon('play')}Play`;
+  const verb = resumeAt ? 'Resume' : 'Play';
+  playBtn.innerHTML = `${icon('play')}${episodeLabel ? `${verb} ${episodeLabel}` : verb}`;
   playBtn.hidden = false;
   playBtn.onclick = () => playFile(filePath, resumeAt);
 }
@@ -280,16 +317,26 @@ function openMovieDetail(movie) {
   el('detailSeasons').innerHTML = '';
 }
 
-function firstEpisodeOf(series) {
+// Continue watching: the first episode (in season/episode order) that isn't
+// fully watched yet. Resumes mid-progress if that episode has any, otherwise
+// lands on the next unwatched one - so the series card/hero Play button jumps
+// you forward instead of always restarting at S1E1. Falls back to the very
+// first episode once everything is watched.
+function nextEpisodeToWatch(series) {
+  let first = null;
   for (const season of series.seasons) {
-    const ep = season.episodes.find((e) => !e.upcoming);
-    if (ep) return ep;
+    for (const ep of season.episodes) {
+      if (ep.upcoming || !ep.filePath) continue;
+      if (!first) first = ep;
+      const p = state.progress[ep.filePath];
+      if (!p || !p.watched) return ep;
+    }
   }
-  return null;
+  return first;
 }
 
-function playFirstEpisode(series) {
-  const ep = firstEpisodeOf(series);
+function playNextEpisode(series) {
+  const ep = nextEpisodeToWatch(series);
   if (ep) playFile(ep.filePath);
 }
 
@@ -301,9 +348,10 @@ function openSeriesDetail(series) {
     formatRuntime(series.runtime), series.contentRating, ...(series.genres || [])
   ]);
 
-  const firstEp = firstEpisodeOf(series);
-  if (firstEp) {
-    setPlayButton(firstEp.filePath);
+  const nextEp = nextEpisodeToWatch(series);
+  if (nextEp) {
+    const label = `S${nextEp.season ?? '?'} E${String(nextEp.episode ?? 0).padStart(2, '0')}`;
+    setPlayButton(nextEp.filePath, label);
   } else {
     el('detailPlayBtn').hidden = true;
   }
@@ -655,6 +703,10 @@ function setupRescan() {
   el('rescanBtn').addEventListener('click', fetchLibrary);
 }
 
+function setupRetryLoad() {
+  el('retryLoadBtn').addEventListener('click', fetchLibrary);
+}
+
 function wireStaticIcons() {
   el('backFromDetail').innerHTML = `${icon('chevronLeft')}Back`;
   el('backFromTrash').innerHTML = `${icon('chevronLeft')}Back`;
@@ -666,6 +718,7 @@ function wireStaticIcons() {
   el('detailTrailerBtn').innerHTML = `${icon('link')}Watch Trailer`;
   el('detailPlayBtn').innerHTML = `${icon('play')}Play`;
   el('emptyTrashBtn').innerHTML = `${icon('trash')}Empty Trash`;
+  el('loadErrorIcon').innerHTML = icon('info');
 }
 
 wireStaticIcons();
@@ -676,4 +729,6 @@ setupEpisodeEdit();
 setupTrash();
 setupSettings();
 setupRescan();
+setupRetryLoad();
+setupModalDismissal();
 fetchLibrary();

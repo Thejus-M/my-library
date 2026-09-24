@@ -584,6 +584,7 @@ main { padding: 0 0 60px; }
   color: var(--text-dim);
 }
 .empty-state-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.6; }
+.empty-state .pill-btn { margin-top: 14px; }
 
 .meta-rating { display: inline-flex; align-items: center; gap: 5px; }
 .meta-rating .icon-star { color: var(--text); font-size: 0.85em; }
