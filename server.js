@@ -432,16 +432,21 @@ app.get('/api/progress', (req, res) => {
   res.json(loadProgress());
 });
 
-// Manual correction on top of the automatic tracking, e.g. "actually mark this watched".
+// Manual correction on top of the automatic tracking, e.g. "actually mark this
+// watched" or "I'm rewatching this, stop calling it done". Unmarking resets
+// percent/position to 0 rather than leaving a stale 100% behind - "unwatched"
+// should mean "starts over," not "resume at the last second."
 app.post('/api/progress/toggle-watched', (req, res) => {
   const { filePath, watched } = req.body || {};
   if (!filePath) return res.status(400).json({ error: 'filePath required' });
+  const isWatched = Boolean(watched);
   const progress = loadProgress();
   const existing = progress[filePath] || { percent: 0, position: 0, duration: 0 };
   progress[filePath] = {
     ...existing,
-    watched: Boolean(watched),
-    percent: watched ? 100 : existing.percent,
+    watched: isWatched,
+    percent: isWatched ? 100 : 0,
+    position: isWatched ? existing.position : 0,
     updatedAt: new Date().toISOString()
   };
   saveProgress(progress);

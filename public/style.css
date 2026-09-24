@@ -549,6 +549,10 @@ main { padding: 0 0 60px; }
 .episode-action-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
 .episode-action-btn:active { transform: scale(0.9); }
 .episode-action-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Solid-fill state for the watched-toggle button once an episode is marked
+   watched - same value-contrast language as the active tab-pill, just circular. */
+.episode-action-btn.is-watched { background: #fff; color: #000; }
+.episode-action-btn.is-watched:hover { background: #e5e5e7; color: #000; }
 .episode-body { flex: 1; min-width: 0; }
 .episode-title {
   font-size: 14px;

@@ -165,6 +165,37 @@ function progressOverlay(filePath) {
   return '';
 }
 
+// Manual correction on top of the automatic VLC-tracked progress - "actually
+// mark this watched" or "I'm rewatching this". Mirrors the server's own merge
+// logic in state.progress immediately so the UI (badge, Play/Resume label)
+// updates without waiting on a full rescan.
+async function toggleWatched(filePath, watched) {
+  try {
+    const res = await fetch('/api/progress/toggle-watched', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath, watched })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast('Could not update watched status: ' + (data.error || res.statusText));
+      return false;
+    }
+    const existing = state.progress[filePath] || { percent: 0, position: 0, duration: 0 };
+    state.progress[filePath] = {
+      ...existing,
+      watched,
+      percent: watched ? 100 : 0,
+      position: watched ? existing.position : 0,
+      updatedAt: new Date().toISOString()
+    };
+    return true;
+  } catch (err) {
+    showToast('Could not reach server: ' + err.message);
+    return false;
+  }
+}
+
 function posterOrFallback(item) {
   const inner = item.posterUrl
     ? `<img class="poster" src="${item.posterUrl}" alt="${escapeHtml(item.title)}" loading="lazy" />`
@@ -386,6 +417,20 @@ function openMovieDetail(movie) {
   setPlayButton(movie.filePath);
   el('detailRandomBtn').hidden = true;
 
+  // Manual override on top of the automatic watched detection - lets you flag
+  // something you watched elsewhere, or restart tracking on a rewatch.
+  const watchedBtn = el('detailWatchedBtn');
+  const isWatched = Boolean(state.progress[movie.filePath] && state.progress[movie.filePath].watched);
+  watchedBtn.hidden = false;
+  watchedBtn.innerHTML = `${icon('check')}${isWatched ? 'Mark Unwatched' : 'Mark Watched'}`;
+  watchedBtn.onclick = async () => {
+    const ok = await toggleWatched(movie.filePath, !isWatched);
+    if (ok) {
+      showToast(isWatched ? 'Marked as unwatched' : 'Marked as watched');
+      openMovieDetail(movie);
+    }
+  };
+
   const deleteBtn = el('detailDeleteBtn');
   deleteBtn.hidden = false;
   deleteBtn.onclick = () => {
@@ -453,6 +498,9 @@ function openSeriesDetail(series) {
   } else {
     el('detailPlayBtn').hidden = true;
   }
+  // No single file to toggle at the series level - watched is set per episode
+  // in the list below.
+  el('detailWatchedBtn').hidden = true;
 
   // Shuffle-watch: only worth offering once there's more than one downloaded
   // episode to actually pick from.
@@ -509,6 +557,11 @@ function openSeriesDetail(series) {
             ${ep.airDate || ep.rating ? `<div class="episode-sub">${[ratingHtml(ep.rating), ep.airDate ? escapeHtml(formatDate(ep.airDate)) : null].filter(Boolean).join('<span class="dot"></span>')}</div>` : ''}
           </div>
           <div class="episode-actions">
+            ${(() => {
+              const w = Boolean(state.progress[ep.filePath] && state.progress[ep.filePath].watched);
+              const label = w ? 'Mark unwatched' : 'Mark watched';
+              return `<button class="episode-action-btn episode-watched-btn${w ? ' is-watched' : ''}" title="${label}" aria-label="${label}">${icon('check')}</button>`;
+            })()}
             <button class="episode-action-btn episode-edit-btn" title="Fix episode number" aria-label="Fix episode number">${icon('pencil')}</button>
             <button class="episode-action-btn episode-trash-btn" title="Delete" aria-label="Delete">${icon('trash')}</button>
             <div class="play-icon">${icon('play')}</div>
@@ -521,6 +574,17 @@ function openSeriesDetail(series) {
   el('detailSeasons').querySelectorAll('.episode-row:not(.episode-row-upcoming)').forEach((row) => {
     makeCardClickable(row, () => playFile(row.dataset.file));
 
+    row.querySelector('.episode-watched-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const filePath = row.dataset.file;
+      const currentlyWatched = Boolean(state.progress[filePath] && state.progress[filePath].watched);
+      const ok = await toggleWatched(filePath, !currentlyWatched);
+      if (ok) {
+        showToast(currentlyWatched ? 'Marked as unwatched' : 'Marked as watched');
+        const updated = state.series.find((s) => s.id === series.id);
+        if (updated) openSeriesDetail(updated);
+      }
+    });
     row.querySelector('.episode-edit-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       openEpisodeEditModal(row.dataset.episodeId);
@@ -548,6 +612,11 @@ function closeDetail() {
   withViewTransition(() => {
     el('detailView').hidden = true;
     el('app').hidden = false;
+    // A watched-status toggle (or an edit-and-rescan) made while in detail can
+    // leave the grid behind it stale - e.g. no watched badge yet on the card
+    // you just finished. Re-render the active tab on the way out so it's
+    // never out of sync with what you just did.
+    renderActiveTab();
   });
   state.currentDetail = null;
   saveLastView();
