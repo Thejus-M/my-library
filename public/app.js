@@ -16,13 +16,23 @@ const ICONS = {
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M18 7l-.8 12a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7"/><path d="M10 11v6M14 11v6"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17l9-10"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>',
-  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14 20 4M14 4h6v6M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>'
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14 20 4M14 4h6v6M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3.3c1.5 0 2.9.8 3.6 2.1l1.1 2M4 18h3.3c1.5 0 2.9-.8 3.6-2.1l3.2-5.8c.7-1.3 2.1-2.1 3.6-2.1H20"/><path d="M17 4.2 20 6l-3 1.8M17 16.2l3 1.8-3 1.8"/></svg>'
 };
 function icon(name, extraClass) {
   return `<span class="icon${extraClass ? ' ' + extraClass : ''}" aria-hidden="true">${ICONS[name]}</span>`;
 }
 
-const state = { movies: [], series: [], tmdbConfigured: true, activeTab: 'movies', currentDetail: null, progress: {} };
+const state = {
+  movies: [], series: [], tmdbConfigured: true, activeTab: 'movies', currentDetail: null, progress: {},
+  // Per-tab filter text and sort mode - independent so switching tabs doesn't
+  // reset what you were looking for on the other one.
+  moviesFilter: '', seriesFilter: '', moviesSort: 'title', seriesSort: 'title',
+  // The exact (filtered + sorted) item list currently rendered in each grid,
+  // in on-screen order - card click handlers index into this, not the raw
+  // state.movies/series arrays, since those two can differ once filtered/sorted.
+  moviesVisible: [], seriesVisible: []
+};
 
 const el = (id) => document.getElementById(id);
 
@@ -35,6 +45,28 @@ function withViewTransition(updateFn) {
     document.startViewTransition(updateFn);
   } else {
     updateFn();
+  }
+}
+
+// --- Remember last view (tab + open detail) across reloads ---
+//
+// Single-user local app with no backend session, so localStorage is enough -
+// no server round-trip needed to restore "where I was" on refresh/reopen.
+// Wrapped in try/catch: private-browsing / blocked storage should degrade to
+// "just open on Movies" rather than break the app.
+const LAST_VIEW_KEY = 'myLibrary.lastView';
+function loadLastView() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_VIEW_KEY));
+  } catch {
+    return null;
+  }
+}
+function saveLastView() {
+  try {
+    localStorage.setItem(LAST_VIEW_KEY, JSON.stringify({ tab: state.activeTab, detail: state.currentDetail }));
+  } catch {
+    // ignore - non-critical convenience feature
   }
 }
 
@@ -79,6 +111,8 @@ function setupModalDismissal() {
   });
 }
 
+let didRestoreView = false;
+
 async function fetchLibrary() {
   el('loading').hidden = false;
   el('loadError').hidden = true;
@@ -99,7 +133,12 @@ async function fetchLibrary() {
     state.tmdbConfigured = data.tmdbConfigured;
     state.progress = progressRes ? await progressRes.json().catch(() => ({})) : {};
     el('loading').hidden = true;
-    renderActiveTab();
+    if (didRestoreView) {
+      renderActiveTab();
+    } else {
+      didRestoreView = true;
+      restoreLastView();
+    }
   } catch (err) {
     // Server unreachable or scan failed - show a real error state with a
     // retry action instead of leaving the loading skeleton spinning forever.
@@ -162,6 +201,26 @@ function renderHero(heroEl, item, onPlay, onMoreInfo) {
 // Stagger delay is capped so long lists don't feel slow to appear.
 const STAGGER_CAP = 12;
 
+// Sort modes available per shelf - series has no single "year" field (only
+// per-episode air dates), so it only offers Title/Rating.
+const SORT_LABELS = { title: 'Title A–Z', year: 'Year: Newest', rating: 'Rating: Highest' };
+const MOVIE_SORT_MODES = ['title', 'year', 'rating'];
+const SERIES_SORT_MODES = ['title', 'rating'];
+const SORTERS = {
+  title: (a, b) => a.title.localeCompare(b.title),
+  year: (a, b) => (b.year || 0) - (a.year || 0),
+  rating: (a, b) => (b.rating || 0) - (a.rating || 0)
+};
+
+// Filters `items` by title against `query`, sorts by `sortMode`, and returns
+// the result - shared by both shelves so Movies/Series stay in lockstep.
+function visibleItems(items, query, sortMode) {
+  const q = query.trim().toLowerCase();
+  const filtered = q ? items.filter((it) => (it.title || '').toLowerCase().includes(q)) : items.slice();
+  filtered.sort(SORTERS[sortMode] || SORTERS.title);
+  return filtered;
+}
+
 function makeCardClickable(card, onActivate) {
   card.addEventListener('click', onActivate);
   card.addEventListener('keydown', (e) => {
@@ -177,12 +236,21 @@ function renderMovies() {
   const hero = state.movies.find((m) => m.backdropUrl) || state.movies[0];
   renderHero(el('moviesHero'), hero, (m) => playFile(m.filePath), (m) => openMovieDetail(m));
 
+  el('moviesSortBtn').textContent = `Sort: ${SORT_LABELS[state.moviesSort]}`;
+
   const grid = el('moviesGrid');
   if (!state.movies.length) {
     grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('film')}</div>No movies found in the configured folder.</div>`;
+    state.moviesVisible = [];
     return;
   }
-  grid.innerHTML = state.movies.map((m, i) => `
+  const visible = visibleItems(state.movies, state.moviesFilter, state.moviesSort);
+  state.moviesVisible = visible;
+  if (!visible.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('film')}</div>No movies match "${escapeHtml(state.moviesFilter.trim())}".</div>`;
+    return;
+  }
+  grid.innerHTML = visible.map((m, i) => `
     <div class="card" tabindex="0" role="button" aria-label="${escapeHtml(m.title)}" style="--i:${Math.min(i, STAGGER_CAP)}" data-movie-index="${i}">
       ${posterOrFallback(m)}
       <div class="card-meta">
@@ -192,7 +260,7 @@ function renderMovies() {
     </div>
   `).join('');
   grid.querySelectorAll('[data-movie-index]').forEach((card) => {
-    makeCardClickable(card, () => openMovieDetail(state.movies[card.dataset.movieIndex]));
+    makeCardClickable(card, () => openMovieDetail(state.moviesVisible[card.dataset.movieIndex]));
   });
 }
 
@@ -200,12 +268,21 @@ function renderSeries() {
   const hero = state.series.find((s) => s.backdropUrl) || state.series[0];
   renderHero(el('seriesHero'), hero, (s) => playNextEpisode(s), (s) => openSeriesDetail(s));
 
+  el('seriesSortBtn').textContent = `Sort: ${SORT_LABELS[state.seriesSort]}`;
+
   const grid = el('seriesGrid');
   if (!state.series.length) {
     grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('tv')}</div>No series found in the configured folder.</div>`;
+    state.seriesVisible = [];
     return;
   }
-  grid.innerHTML = state.series.map((s, i) => `
+  const visible = visibleItems(state.series, state.seriesFilter, state.seriesSort);
+  state.seriesVisible = visible;
+  if (!visible.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('tv')}</div>No series match "${escapeHtml(state.seriesFilter.trim())}".</div>`;
+    return;
+  }
+  grid.innerHTML = visible.map((s, i) => `
     <div class="card" tabindex="0" role="button" aria-label="${escapeHtml(s.title)}" style="--i:${Math.min(i, STAGGER_CAP)}" data-series-index="${i}">
       ${posterOrFallback(s)}
       <div class="card-meta">
@@ -215,7 +292,7 @@ function renderSeries() {
     </div>
   `).join('');
   grid.querySelectorAll('[data-series-index]').forEach((card) => {
-    makeCardClickable(card, () => openSeriesDetail(state.series[card.dataset.seriesIndex]));
+    makeCardClickable(card, () => openSeriesDetail(state.seriesVisible[card.dataset.seriesIndex]));
   });
 }
 
@@ -255,11 +332,17 @@ function openDetailShell(item) {
       backdrop.style.display = 'none';
     }
 
+    // No poster at all (no TMDB match, no manual override) - show the same
+    // text-tile fallback the grid uses instead of just dropping the poster.
+    const posterFallback = el('detailPosterFallback');
     if (item.posterUrl) {
       el('detailPoster').src = item.posterUrl;
       el('detailPoster').style.display = 'block';
+      posterFallback.hidden = true;
     } else {
       el('detailPoster').style.display = 'none';
+      posterFallback.textContent = item.title;
+      posterFallback.hidden = false;
     }
 
     el('detailTitle').textContent = item.title;
@@ -295,11 +378,13 @@ function setPlayButton(filePath, episodeLabel) {
 
 function openMovieDetail(movie) {
   state.currentDetail = { type: 'movie', id: movie.id };
+  saveLastView();
   openDetailShell(movie);
   el('detailMeta').innerHTML = ratingHtml(movie.rating) + metaRow([
     movie.year, formatRuntime(movie.runtime), movie.contentRating, ...(movie.genres || [])
   ]);
   setPlayButton(movie.filePath);
+  el('detailRandomBtn').hidden = true;
 
   const deleteBtn = el('detailDeleteBtn');
   deleteBtn.hidden = false;
@@ -340,8 +425,21 @@ function playNextEpisode(series) {
   if (ep) playFile(ep.filePath);
 }
 
+// Every episode that's actually on disk (skips upcoming/undownloaded
+// placeholders, which have no filePath to play) - the pool "Random Episode" draws from.
+function playableEpisodes(series) {
+  const out = [];
+  for (const season of series.seasons) {
+    for (const ep of season.episodes) {
+      if (!ep.upcoming && ep.filePath) out.push(ep);
+    }
+  }
+  return out;
+}
+
 function openSeriesDetail(series) {
   state.currentDetail = { type: 'series', id: series.id };
+  saveLastView();
   openDetailShell(series);
   el('detailMeta').innerHTML = ratingHtml(series.rating) + metaRow([
     series.seasons.length + ' season' + (series.seasons.length === 1 ? '' : 's'),
@@ -355,6 +453,22 @@ function openSeriesDetail(series) {
   } else {
     el('detailPlayBtn').hidden = true;
   }
+
+  // Shuffle-watch: only worth offering once there's more than one downloaded
+  // episode to actually pick from.
+  const randomBtn = el('detailRandomBtn');
+  const playable = playableEpisodes(series);
+  if (playable.length > 1) {
+    randomBtn.hidden = false;
+    randomBtn.onclick = () => {
+      const pool = playable.filter((ep) => ep.filePath !== nextEp?.filePath);
+      const choices = pool.length ? pool : playable;
+      playFile(choices[Math.floor(Math.random() * choices.length)].filePath);
+    };
+  } else {
+    randomBtn.hidden = true;
+  }
+
   el('detailDeleteBtn').hidden = true;
 
   // An upcoming episode you haven't downloaded yet: no file, so no play/edit/delete -
@@ -435,6 +549,8 @@ function closeDetail() {
     el('detailView').hidden = true;
     el('app').hidden = false;
   });
+  state.currentDetail = null;
+  saveLastView();
 }
 
 // --- Play in VLC ---
@@ -469,6 +585,29 @@ function renderActiveTab() {
   }
 }
 
+// On first load only: reopen whichever tab (and detail, if any) was open the
+// last time this browser had the app open, instead of always resetting to
+// the top of Movies. Falls back to the default Movies grid if there's
+// nothing stored, or if the stored item no longer exists in the library.
+function restoreLastView() {
+  const last = loadLastView();
+  if (last && (last.tab === 'movies' || last.tab === 'series') && last.tab !== state.activeTab) {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === last.tab));
+    state.activeTab = last.tab;
+  }
+  renderActiveTab();
+
+  const detail = last && last.detail;
+  if (detail && detail.type && detail.id) {
+    const list = detail.type === 'movie' ? state.movies : state.series;
+    const item = list.find((it) => it.id === detail.id);
+    if (item) {
+      if (detail.type === 'movie') openMovieDetail(item);
+      else openSeriesDetail(item);
+    }
+  }
+}
+
 function setupTabs() {
   document.querySelectorAll('.tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -477,8 +616,10 @@ function setupTabs() {
         document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         state.activeTab = btn.dataset.tab;
+        state.currentDetail = null;
         renderActiveTab();
       });
+      saveLastView();
     });
   });
 }
@@ -684,6 +825,13 @@ function setupSettings() {
     openModal(el('settingsModal'));
   });
   el('closeSettings').addEventListener('click', () => closeModal(el('settingsModal')));
+  el('clearCacheBtn').addEventListener('click', async () => {
+    if (!confirm('Clear cached TMDB metadata? The next scan re-fetches everything fresh, which takes longer and uses more TMDB API calls.')) return;
+    await fetch('/api/clear-metadata-cache', { method: 'POST' });
+    showToast('Metadata cache cleared');
+    closeModal(el('settingsModal'));
+    fetchLibrary();
+  });
   el('saveSettings').addEventListener('click', async () => {
     await fetch('/api/config', {
       method: 'POST',
@@ -707,6 +855,69 @@ function setupRetryLoad() {
   el('retryLoadBtn').addEventListener('click', fetchLibrary);
 }
 
+// Per-shelf filter text box + a single cycling sort pill (Title/Year/Rating
+// for movies, Title/Rating for series - series has no single "year" field).
+function setupShelfControls() {
+  el('moviesSearchInput').addEventListener('input', (e) => {
+    state.moviesFilter = e.target.value;
+    renderMovies();
+  });
+  el('seriesSearchInput').addEventListener('input', (e) => {
+    state.seriesFilter = e.target.value;
+    renderSeries();
+  });
+  el('moviesSortBtn').addEventListener('click', () => {
+    const i = MOVIE_SORT_MODES.indexOf(state.moviesSort);
+    state.moviesSort = MOVIE_SORT_MODES[(i + 1) % MOVIE_SORT_MODES.length];
+    renderMovies();
+  });
+  el('seriesSortBtn').addEventListener('click', () => {
+    const i = SERIES_SORT_MODES.indexOf(state.seriesSort);
+    state.seriesSort = SERIES_SORT_MODES[(i + 1) % SERIES_SORT_MODES.length];
+    renderSeries();
+  });
+}
+
+// Arrow-key navigation across poster grids and episode lists, extending the
+// existing focus-visible outlines to real keyboard/d-pad-style browsing
+// instead of just Tab-order. Left/Right/Up/Down move between cards in a grid
+// (column count worked out from actual layout, so it holds at any breakpoint
+// or grid density); Up/Down move between episode rows in a series detail.
+function setupKeyboardGridNav() {
+  document.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+
+    const card = e.target.closest('.card');
+    if (card) {
+      const grid = card.closest('.grid');
+      const cards = [...grid.children];
+      const idx = cards.indexOf(card);
+      const firstTop = cards[0].offsetTop;
+      let columns = cards.findIndex((c) => c.offsetTop !== firstTop);
+      if (columns === -1) columns = cards.length;
+      let nextIdx = idx;
+      if (e.key === 'ArrowRight') nextIdx = idx + 1;
+      else if (e.key === 'ArrowLeft') nextIdx = idx - 1;
+      else if (e.key === 'ArrowDown') nextIdx = idx + columns;
+      else if (e.key === 'ArrowUp') nextIdx = idx - columns;
+      if (nextIdx < 0 || nextIdx >= cards.length) return;
+      e.preventDefault();
+      cards[nextIdx].focus();
+      return;
+    }
+
+    const row = e.target.closest('.episode-row:not(.episode-row-upcoming)');
+    if (row && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const rows = [...document.querySelectorAll('#detailSeasons .episode-row:not(.episode-row-upcoming)')];
+      const idx = rows.indexOf(row);
+      const nextIdx = e.key === 'ArrowDown' ? idx + 1 : idx - 1;
+      if (nextIdx < 0 || nextIdx >= rows.length) return;
+      e.preventDefault();
+      rows[nextIdx].focus();
+    }
+  });
+}
+
 function wireStaticIcons() {
   el('backFromDetail').innerHTML = `${icon('chevronLeft')}Back`;
   el('backFromTrash').innerHTML = `${icon('chevronLeft')}Back`;
@@ -717,8 +928,10 @@ function wireStaticIcons() {
   el('detailDeleteBtn').innerHTML = `${icon('trash')}Delete`;
   el('detailTrailerBtn').innerHTML = `${icon('link')}Watch Trailer`;
   el('detailPlayBtn').innerHTML = `${icon('play')}Play`;
+  el('detailRandomBtn').innerHTML = `${icon('shuffle')}Random Episode`;
   el('emptyTrashBtn').innerHTML = `${icon('trash')}Empty Trash`;
   el('loadErrorIcon').innerHTML = icon('info');
+  el('clearCacheBtn').innerHTML = `${icon('refresh')}Clear Metadata Cache`;
 }
 
 wireStaticIcons();
@@ -731,4 +944,6 @@ setupSettings();
 setupRescan();
 setupRetryLoad();
 setupModalDismissal();
+setupShelfControls();
+setupKeyboardGridNav();
 fetchLibrary();

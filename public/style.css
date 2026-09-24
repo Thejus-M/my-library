@@ -224,6 +224,50 @@ main { padding: 0 0 60px; }
   padding: 28px 32px 14px;
 }
 
+/* --- Shelf controls: per-tab filter + sort, sitting beside the row title --- */
+
+.row-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 28px 32px 14px;
+}
+.row-title-bar .row-title { padding: 0; }
+
+.shelf-controls { display: flex; align-items: center; gap: 10px; }
+
+.shelf-search {
+  width: 200px;
+  max-width: 40vw;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.3);
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color .15s;
+}
+.shelf-search::placeholder { color: var(--text-dim); }
+.shelf-search:focus-visible { outline: none; border-color: #fff; }
+
+.shelf-sort-btn {
+  background: rgba(255,255,255,0.06);
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .2s, color .2s, transform .15s;
+}
+.shelf-sort-btn:hover { background: rgba(255,255,255,0.14); color: var(--text); }
+.shelf-sort-btn:active { transform: scale(0.96); }
+.shelf-sort-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -396,6 +440,26 @@ main { padding: 0 0 60px; }
   flex-shrink: 0;
   background: var(--bg-raised);
 }
+/* Shown instead of .detail-poster when there's no poster at all (no TMDB match,
+   no manual override) - the grid already has a text-tile fallback for this
+   case, the detail view was silently dropping the poster instead. */
+.detail-poster-fallback {
+  width: 180px;
+  aspect-ratio: 2/3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: linear-gradient(160deg, #2c2c2e, #1c1c1e);
+  border-radius: var(--card-radius);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+  flex-shrink: 0;
+}
+.detail-poster-fallback[hidden] { display: none; }
 .detail-info { padding-top: 90px; max-width: 640px; }
 .detail-info h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 6px; }
 .detail-tagline { font-size: 15px; font-style: italic; color: var(--text-dim); margin: 0 0 10px; }
@@ -560,6 +624,7 @@ main { padding: 0 0 60px; }
 .modal-box input:focus-visible { outline: none; border-color: #fff; }
 .hint { font-size: 12px; color: var(--text-dim); margin: 6px 0 0; }
 .hint a { color: var(--text); }
+.settings-inline-btn { margin-top: 10px; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .modal-actions button {
@@ -680,10 +745,13 @@ main { padding: 0 0 60px; }
   .pill-btn { padding: 9px 18px; font-size: 14px; }
 
   .detail-content { flex-direction: column; margin-top: -60px; }
-  .detail-poster { width: 130px; }
+  .detail-poster, .detail-poster-fallback { width: 130px; }
   .detail-info { padding-top: 0; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 20px 12px; padding: 0 16px; }
   .row-title { padding: 18px 16px 10px; }
+  .row-title-bar { padding: 18px 16px 10px; }
+  .shelf-search { width: 100%; max-width: none; }
+  .shelf-controls { width: 100%; }
   .detail-seasons { padding: 24px 16px 60px; }
   .trash-header { padding: 70px 16px 16px; }
   .trash-list { padding: 0 16px 40px; }

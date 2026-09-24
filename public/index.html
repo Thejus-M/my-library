@@ -35,13 +35,25 @@
 
     <section id="moviesView" class="tab-view">
       <div class="hero" id="moviesHero" hidden></div>
-      <div class="row-title">Movies</div>
+      <div class="row-title-bar">
+        <div class="row-title">Movies</div>
+        <div class="shelf-controls">
+          <input type="search" id="moviesSearchInput" class="shelf-search" placeholder="Filter Movies" aria-label="Filter movies" />
+          <button type="button" id="moviesSortBtn" class="shelf-sort-btn"></button>
+        </div>
+      </div>
       <div class="grid" id="moviesGrid"></div>
     </section>
 
     <section id="seriesView" class="tab-view" hidden>
       <div class="hero" id="seriesHero" hidden></div>
-      <div class="row-title">Series</div>
+      <div class="row-title-bar">
+        <div class="row-title">Series</div>
+        <div class="shelf-controls">
+          <input type="search" id="seriesSearchInput" class="shelf-search" placeholder="Filter Series" aria-label="Filter series" />
+          <button type="button" id="seriesSortBtn" class="shelf-sort-btn"></button>
+        </div>
+      </div>
       <div class="grid" id="seriesGrid"></div>
     </section>
   </main>
@@ -54,6 +66,7 @@
     </div>
     <div class="detail-content">
       <img id="detailPoster" class="detail-poster" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" />
+      <div id="detailPosterFallback" class="detail-poster-fallback" hidden></div>
       <div class="detail-info">
         <h1 id="detailTitle"></h1>
         <p class="detail-tagline" id="detailTagline" hidden></p>
@@ -61,6 +74,7 @@
         <p class="detail-overview" id="detailOverview"></p>
         <div class="detail-actions">
           <button class="play-btn" id="detailPlayBtn" hidden></button>
+          <button class="pill-btn secondary" id="detailRandomBtn" hidden></button>
           <button class="pill-btn secondary" id="detailTrailerBtn" hidden></button>
           <button class="pill-btn secondary" id="detailEditBtn"></button>
           <button class="pill-btn secondary" id="detailDeleteBtn" hidden></button>
@@ -122,6 +136,8 @@
       <p class="hint">Get a free key at
         <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>
       </p>
+      <button type="button" id="clearCacheBtn" class="pill-btn secondary settings-inline-btn"></button>
+      <p class="hint">Wipes cached posters/overviews/ratings so the next scan re-fetches everything fresh from TMDB.</p>
       <label>Movies folder</label>
       <input id="moviesPathInput" type="text" />
       <label>Series folder</label>
