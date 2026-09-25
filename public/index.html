@@ -114,12 +114,16 @@
 
   <div id="episodeEditModal" class="modal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="episodeEditTitle">
-      <h2 id="episodeEditTitle">Fix episode number</h2>
-      <p class="hint">If TMDB numbers this episode differently than the filename does, enter the correct season and episode to fetch its real title, overview, and still.</p>
+      <h2 id="episodeEditTitle">Fix episode</h2>
+      <p class="hint">If TMDB numbers this episode differently than the filename does, enter the correct season and episode to fetch its real title, overview, and still. Still nothing there? Fill in a title/overview yourself below.</p>
       <label>Season</label>
       <input id="episodeSeasonInput" type="number" min="0" />
       <label>Episode</label>
       <input id="episodeNumberInput" type="number" min="0" />
+      <label>Manual title (fallback only)</label>
+      <input id="episodeTitleInput" type="text" placeholder="used only if TMDB still has nothing" />
+      <label>Manual overview (fallback only)</label>
+      <input id="episodeOverviewInput" type="text" placeholder="plot summary" />
       <div class="modal-actions">
         <button id="closeEpisodeEdit">Cancel</button>
         <button id="saveEpisodeEdit" class="primary">Save &amp; Rescan</button>

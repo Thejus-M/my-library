@@ -797,7 +797,11 @@ function openSeriesDetail(series) {
           <div class="episode-body">
             <div class="episode-title">${escapeHtml(ep.title)}</div>
             ${ep.overview ? `<div class="episode-overview">${escapeHtml(ep.overview)}</div>` : ''}
-            ${ep.airDate || ep.rating ? `<div class="episode-sub">${[ratingHtml(ep.rating), ep.airDate ? escapeHtml(formatDate(ep.airDate)) : null].filter(Boolean).join('<span class="dot"></span>')}</div>` : ''}
+            ${ep.airDate || ep.rating
+              ? `<div class="episode-sub">${[ratingHtml(ep.rating), ep.airDate ? escapeHtml(formatDate(ep.airDate)) : null].filter(Boolean).join('<span class="dot"></span>')}</div>`
+              : (!ep.overview && !ep.stillUrl
+                ? `<div class="episode-sub episode-sub-missing">No TMDB details for this episode - use the pencil to try a different match.</div>`
+                : '')}
             ${(() => {
               const p = state.progress[ep.filePath];
               if (!p || !p.watched) return '';
@@ -810,7 +814,7 @@ function openSeriesDetail(series) {
               const label = w ? 'Mark unwatched' : 'Mark watched';
               return `<button class="episode-action-btn episode-watched-btn${w ? ' is-watched' : ''}" title="${label}" aria-label="${label}">${icon('check')}</button>`;
             })()}
-            <button class="episode-action-btn episode-edit-btn" title="Fix episode number" aria-label="Fix episode number">${icon('pencil')}</button>
+            <button class="episode-action-btn episode-edit-btn" title="Fix episode" aria-label="Fix episode">${icon('pencil')}</button>
             <button class="episode-action-btn episode-trash-btn" title="Delete" aria-label="Delete">${icon('trash')}</button>
             <div class="play-icon">${icon('play')}</div>
           </div>
@@ -1021,6 +1025,8 @@ async function openEpisodeEditModal(episodeId) {
   const existing = await res.json();
   el('episodeSeasonInput').value = existing.season || '';
   el('episodeNumberInput').value = existing.episode || '';
+  el('episodeTitleInput').value = existing.title || '';
+  el('episodeOverviewInput').value = existing.overview || '';
   openModal(el('episodeEditModal'));
 }
 
@@ -1033,7 +1039,9 @@ function setupEpisodeEdit() {
       body: JSON.stringify({
         id: episodeEditId,
         season: el('episodeSeasonInput').value,
-        episode: el('episodeNumberInput').value
+        episode: el('episodeNumberInput').value,
+        title: el('episodeTitleInput').value,
+        overview: el('episodeOverviewInput').value
       })
     });
     closeModal(el('episodeEditModal'));

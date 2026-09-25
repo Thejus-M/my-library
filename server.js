@@ -181,8 +181,8 @@ async function scanSeries(cfg, overrides) {
           filePath: path.join(dirForFiles, f.name),
           season: seasonNum,
           episode: episodeNum,
-          title: (epMeta && epMeta.name) || ep.title,
-          overview: epMeta && epMeta.overview,
+          title: (epOverride && epOverride.title) || (epMeta && epMeta.name) || ep.title,
+          overview: (epOverride && epOverride.overview) || (epMeta && epMeta.overview),
           stillUrl: epMeta && epMeta.stillUrl,
           airDate: epMeta && epMeta.airDate,
           rating: epMeta && epMeta.rating,
@@ -335,15 +335,20 @@ app.post('/api/override', (req, res) => {
 });
 
 // Correct a single episode's season/episode number (e.g. a mislabeled rip
-// whose "S14E03" doesn't match any season TMDB actually lists for the show).
+// whose "S14E03" doesn't match any season TMDB actually lists for the show),
+// and/or a manual title/overview fallback for when TMDB genuinely has no
+// data at all for that season - same "always one click from being fixed,
+// never a dead end" escape hatch movies already have.
 app.post('/api/override-episode', (req, res) => {
-  const { id, season, episode } = req.body || {};
+  const { id, season, episode, title, overview } = req.body || {};
   if (!id) return res.status(400).json({ error: 'id required' });
 
   const overrides = loadOverrides();
   const entry = {};
   if (season) entry.season = parseInt(season, 10) || null;
   if (episode) entry.episode = parseInt(episode, 10) || null;
+  if (typeof title === 'string' && title.trim()) entry.title = title.trim();
+  if (typeof overview === 'string' && overview.trim()) entry.overview = overview.trim();
 
   if (Object.keys(entry).length === 0) {
     delete overrides.episodes[id];
