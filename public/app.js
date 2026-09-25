@@ -607,6 +607,7 @@ function openMovieDetail(movie) {
   ]);
   setPlayButton(movie.filePath);
   el('detailRandomBtn').hidden = true;
+  el('detailReloadSeriesBtn').hidden = true;
 
   // Manual override on top of the automatic watched detection - lets you flag
   // something you watched elsewhere, or restart tracking on a rewatch.
@@ -684,10 +685,49 @@ function playableEpisodes(series) {
   return out;
 }
 
+// Force-refreshes just this one series' TMDB data (its cache entry + all its
+// cached seasons) and re-opens its detail with the fresh result - "I fixed a
+// match/override, re-check this show" without the full-library cost of
+// Settings' Clear Metadata Cache. The button spins (and disables, guarding
+// against a double-click) while the request + re-scan are in flight.
+async function reloadSeriesMetadata(series) {
+  const btn = el('detailReloadSeriesBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  try {
+    const res = await fetch('/api/rescan-series', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seriesId: series.id })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast('Could not reload series: ' + (data.error || res.statusText));
+      return;
+    }
+    await fetchLibrary();
+    const updated = state.series.find((s) => s.id === series.id);
+    if (updated) {
+      openSeriesDetail(updated);
+      showToast(`Reloaded ${updated.title}`);
+    } else {
+      closeDetail();
+    }
+  } catch (err) {
+    showToast('Could not reach server: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+  }
+}
+
 function openSeriesDetail(series) {
   state.currentDetail = { type: 'series', id: series.id };
   saveLastView();
   openDetailShell(series);
+  el('detailReloadSeriesBtn').hidden = false;
+  el('detailReloadSeriesBtn').onclick = () => reloadSeriesMetadata(series);
   el('detailMeta').innerHTML = ratingHtml(series.rating) + metaRow([
     series.seasons.length + ' season' + (series.seasons.length === 1 ? '' : 's'),
     formatRuntime(series.runtime), series.contentRating, ...(series.genres || [])
@@ -1219,6 +1259,7 @@ function wireStaticIcons() {
   el('emptyTrashBtn').innerHTML = `${icon('trash')}Empty Trash`;
   el('loadErrorIcon').innerHTML = icon('info');
   el('clearCacheBtn').innerHTML = `${icon('refresh')}Clear Metadata Cache`;
+  el('detailReloadSeriesBtn').innerHTML = icon('refresh');
 }
 
 wireStaticIcons();

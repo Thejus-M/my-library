@@ -407,6 +407,30 @@ app.post('/api/clear-metadata-cache', (req, res) => {
   res.json({ ok: true });
 });
 
+// Force-refresh just one series' TMDB data (its own entry + all cached
+// season entries) - for "I fixed a match/override, re-check this one show"
+// without the full-library cost of Clear Metadata Cache. seriesId is the
+// series' folder name, same as the `id` field /api/library returns per
+// series. The actual re-fetch happens on the client's next /api/library
+// call; this just invalidates what's cached so that call hits TMDB fresh
+// for this show only.
+app.post('/api/rescan-series', (req, res) => {
+  const { seriesId } = req.body || {};
+  if (!seriesId) return res.status(400).json({ error: 'seriesId required' });
+
+  const cfg = loadConfig();
+  const seriesDirPath = path.join(cfg.seriesPath, seriesId);
+  if (!fs.existsSync(seriesDirPath)) {
+    return res.status(404).json({ error: 'Series folder not found' });
+  }
+
+  const overrides = loadOverrides();
+  const override = overrides.series[seriesId] || {};
+  const seriesTitle = override.title || parse.cleanTitle(seriesId);
+  tmdb.invalidateSeries(seriesTitle);
+  res.json({ ok: true });
+});
+
 // --- Playback + watch progress ---
 //
 // VLC doesn't report anything back to a plain spawned process, so we launch it

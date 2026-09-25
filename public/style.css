@@ -402,6 +402,26 @@ main { padding: 0 0 60px; }
 .back-btn:active { transform: scale(0.96); }
 .back-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
+/* Series-only "reload this show's metadata" action - same glass icon-button
+   language as .back-btn, mirrored to the opposite top corner. */
+.detail-reload-btn {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 5;
+  background: rgba(30,30,32,0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.detail-reload-btn[hidden] { display: none; }
+.detail-reload-btn:disabled { opacity: 0.5; cursor: default; }
+.detail-reload-btn.is-loading .icon svg { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .detail-reload-btn.is-loading .icon svg { animation: none; }
+}
+
 .detail-backdrop {
   width: 100%;
   aspect-ratio: 16/7;
