@@ -157,21 +157,60 @@ async function scanSeries(cfg, overrides) {
       const files = listDir(dirForFiles).filter(
         (e) => e.isFile() && isVideoFile(e.name, cfg.videoExtensions)
       );
-      const episodes = [];
-      for (const f of files) {
+
+      // A release group's embedded season number doesn't always match what
+      // TMDB actually calls that season (e.g. a scene group numbering a
+      // revival "S14" when TMDB only goes up to season 11 for that show) -
+      // blindly trusting it sends lookupSeason() a number TMDB has never
+      // heard of, so that episode gets no metadata, and separately the
+      // "next episode to air" block below can't find a same-numbered local
+      // season to attach to and spawns a second, phantom one.
+      //
+      // A number is only "trusted" as-is when there's an explicit manual
+      // override (always wins) or when TMDB's real season list for this show
+      // actually contains it. Anything else falls back, in order: to
+      // whatever season number the *rest of this folder* agreed on (files
+      // living together are almost always the same season even if one file's
+      // own numbering is off) - then to the show's currently-airing season if
+      // it has one - then to its latest known season - then, only if TMDB
+      // gave us nothing to validate against at all, the raw filename/folder
+      // number as before.
+      const validSeasons = meta && Array.isArray(meta.seasonNumbers) ? meta.seasonNumbers : null;
+
+      const parsed = files.map((f) => {
         const ep = parse.parseEpisodeFilename(f.name);
         const epOverride = overrides.episodes[f.name];
-        // A manual override corrects the season/episode number we ask TMDB
-        // for, when the filename's own numbering doesn't match what TMDB
-        // actually lists for the matched show (e.g. a mislabeled rip).
-        const seasonNum = (epOverride && epOverride.season) || ep.season || number;
+        let seasonNum = (epOverride && epOverride.season) || ep.season;
+        const trusted = Boolean(epOverride && epOverride.season) || (seasonNum != null && (!validSeasons || validSeasons.includes(seasonNum)));
+        return { f, ep, epOverride, seasonNum, trusted };
+      });
+
+      let consensusSeason = null;
+      if (validSeasons) {
+        const counts = new Map();
+        for (const p of parsed) {
+          if (p.trusted && p.seasonNum != null) counts.set(p.seasonNum, (counts.get(p.seasonNum) || 0) + 1);
+        }
+        let best = 0;
+        for (const [num, count] of counts) {
+          if (count > best) { consensusSeason = num; best = count; }
+        }
+      }
+      const currentSeason = meta && meta.nextEpisodeToAir && meta.nextEpisodeToAir.season;
+      const latestValidSeason = validSeasons && validSeasons.length ? Math.max(...validSeasons) : null;
+
+      const episodes = [];
+      for (const { f, ep, epOverride, seasonNum, trusted } of parsed) {
+        const resolvedSeason = trusted
+          ? seasonNum
+          : (consensusSeason ?? (validSeasons && currentSeason != null && validSeasons.includes(currentSeason) ? currentSeason : null) ?? latestValidSeason ?? seasonNum ?? number);
         const episodeNum = (epOverride && epOverride.episode) || ep.episode;
-        const seasonMeta = await getSeasonMeta(seasonNum);
+        const seasonMeta = await getSeasonMeta(resolvedSeason);
         const epMeta = seasonMeta && seasonMeta.episodes.find((e) => e.episode === episodeNum);
         episodes.push({
           id: f.name,
           filePath: path.join(dirForFiles, f.name),
-          season: seasonNum,
+          season: resolvedSeason,
           episode: episodeNum,
           title: (epMeta && epMeta.name) || ep.title,
           overview: epMeta && epMeta.overview,
@@ -462,6 +501,34 @@ app.post('/api/progress/toggle-watched', (req, res) => {
   };
   saveProgress(progress);
   res.json({ ok: true });
+});
+
+// Personal 1-5 star rating, e.g. "I watched this, here's what I thought" -
+// distinct from TMDB's own crowd rating. Stored on the same per-file progress
+// record as watched/percent so there's one JSON store for "what am I
+// watching and what did I think of it," not a second database. rating: null
+// clears an existing rating.
+app.post('/api/rate', (req, res) => {
+  const { filePath, rating } = req.body || {};
+  if (!filePath) return res.status(400).json({ error: 'filePath required' });
+
+  let value = null;
+  if (rating !== null && rating !== undefined && rating !== '') {
+    value = parseInt(rating, 10);
+    if (!Number.isInteger(value) || value < 1 || value > 5) {
+      return res.status(400).json({ error: 'rating must be an integer 1-5, or null to clear' });
+    }
+  }
+
+  const progress = loadProgress();
+  const existing = progress[filePath] || { percent: 0, position: 0, duration: 0, watched: false };
+  progress[filePath] = {
+    ...existing,
+    rating: value,
+    updatedAt: new Date().toISOString()
+  };
+  saveProgress(progress);
+  res.json({ ok: true, rating: value });
 });
 
 // Play a file in VLC. Only allow files inside the configured library roots.

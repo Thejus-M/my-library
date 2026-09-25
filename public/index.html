@@ -12,6 +12,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="movies">Movies</button>
       <button class="tab" data-tab="series">Series</button>
+      <button class="tab" data-tab="mylist">My List</button>
     </nav>
     <div class="topbar-actions">
       <button id="trashBtn" class="icon-btn" title="Trash" aria-label="Trash"></button>
@@ -57,6 +58,17 @@
       </div>
       <div class="grid" id="seriesGrid"></div>
     </section>
+
+    <section id="mylistView" class="tab-view" hidden>
+      <div class="row-title-bar">
+        <div class="row-title">My List</div>
+        <div class="shelf-controls">
+          <input type="search" id="mylistSearchInput" class="shelf-search" placeholder="Filter My List" aria-label="Filter my list" />
+          <button type="button" id="mylistSortBtn" class="shelf-sort-btn"></button>
+        </div>
+      </div>
+      <div class="grid" id="mylistGrid"></div>
+    </section>
   </main>
 
   <!-- Detail overlay: shared by movies and series -->
@@ -80,6 +92,9 @@
           <button class="pill-btn secondary" id="detailTrailerBtn" hidden></button>
           <button class="pill-btn secondary" id="detailEditBtn"></button>
           <button class="pill-btn secondary" id="detailDeleteBtn" hidden></button>
+        </div>
+        <div class="detail-rating-row" id="detailRatingRow" hidden>
+          <span class="detail-rating-label">Your Rating</span>
         </div>
       </div>
     </div>

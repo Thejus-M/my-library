@@ -17,7 +17,10 @@ const ICONS = {
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17l9-10"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>',
   link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14 20 4M14 4h6v6M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>',
-  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3.3c1.5 0 2.9.8 3.6 2.1l1.1 2M4 18h3.3c1.5 0 2.9-.8 3.6-2.1l3.2-5.8c.7-1.3 2.1-2.1 3.6-2.1H20"/><path d="M17 4.2 20 6l-3 1.8M17 16.2l3 1.8-3 1.8"/></svg>'
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3.3c1.5 0 2.9.8 3.6 2.1l1.1 2M4 18h3.3c1.5 0 2.9-.8 3.6-2.1l3.2-5.8c.7-1.3 2.1-2.1 3.6-2.1H20"/><path d="M17 4.2 20 6l-3 1.8M17 16.2l3 1.8-3 1.8"/></svg>',
+  // Same star outline as `star`, but stroke-only - the "not rated this high
+  // yet" state in the personal 1-5 rating row (star = filled/rated).
+  starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3.3c.3 0 .6.2.7.5l2 4.5 4.9.6c.7.1 1 1 .5 1.5l-3.6 3.4.9 4.8c.1.7-.6 1.2-1.2.9L12 17.1l-4.2 2.4c-.6.3-1.3-.2-1.2-.9l.9-4.8-3.6-3.4c-.5-.5-.2-1.4.5-1.5l4.9-.6 2-4.5c.1-.3.4-.5.7-.5Z"/></svg>'
 };
 function icon(name, extraClass) {
   return `<span class="icon${extraClass ? ' ' + extraClass : ''}" aria-hidden="true">${ICONS[name]}</span>`;
@@ -28,10 +31,11 @@ const state = {
   // Per-tab filter text and sort mode - independent so switching tabs doesn't
   // reset what you were looking for on the other one.
   moviesFilter: '', seriesFilter: '', moviesSort: 'title', seriesSort: 'title',
+  mylistFilter: '', mylistSort: 'recent',
   // The exact (filtered + sorted) item list currently rendered in each grid,
   // in on-screen order - card click handlers index into this, not the raw
   // state.movies/series arrays, since those two can differ once filtered/sorted.
-  moviesVisible: [], seriesVisible: []
+  moviesVisible: [], seriesVisible: [], mylistVisible: []
 };
 
 const el = (id) => document.getElementById(id);
@@ -208,6 +212,79 @@ async function toggleWatched(filePath, watched) {
   }
 }
 
+// Personal 1-5 star rating - distinct from TMDB's own rating. Same
+// optimistic-local-update pattern as toggleWatched: mirrors the server's
+// merge into state.progress so every rating widget for this file (detail,
+// episode row, My List card) stays in sync without a rescan.
+async function rateFile(filePath, rating) {
+  try {
+    const res = await fetch('/api/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath, rating })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast('Could not save rating: ' + (data.error || res.statusText));
+      return false;
+    }
+    const existing = state.progress[filePath] || { percent: 0, position: 0, duration: 0, watched: false };
+    state.progress[filePath] = { ...existing, rating, updatedAt: new Date().toISOString() };
+    return true;
+  } catch (err) {
+    showToast('Could not reach server: ' + err.message);
+    return false;
+  }
+}
+
+// A row of 5 clickable stars, filled up to the current rating. Clicking the
+// star that's already the current rating clears it (handled by the shared
+// delegated listener in setupStarRatingDelegation). Monochrome per DESIGN.md -
+// filled vs. outline is the only visual difference, no color.
+function starRatingHtml(filePath, currentRating) {
+  const stars = [1, 2, 3, 4, 5].map((n) => {
+    const filled = currentRating && n <= currentRating;
+    return `<button type="button" class="star-rating-btn${filled ? ' filled' : ''}" data-value="${n}" aria-label="Rate ${n} star${n === 1 ? '' : 's'}" aria-pressed="${filled}">${icon(filled ? 'star' : 'starOutline')}</button>`;
+  }).join('');
+  return `<div class="star-rating" data-file="${escapeHtml(filePath)}">${stars}</div>`;
+}
+
+// One delegated listener handles every star-rating row on the page (detail
+// view, episode rows, My List cards) instead of wiring each one individually.
+function setupStarRatingDelegation() {
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.star-rating-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const filePath = btn.closest('.star-rating').dataset.file;
+    const value = parseInt(btn.dataset.value, 10);
+    const current = state.progress[filePath] && state.progress[filePath].rating;
+    const nextRating = current === value ? null : value;
+    const ok = await rateFile(filePath, nextRating);
+    if (ok) {
+      showToast(nextRating ? `Rated ${nextRating} star${nextRating === 1 ? '' : 's'}` : 'Rating cleared');
+      refreshCurrentView();
+    }
+  });
+}
+
+// Re-renders whatever's actually on screen after a background state change
+// (rating, watched-toggle) so every view showing that file - grid, detail,
+// My List - reflects it immediately, without a full rescan.
+function refreshCurrentView() {
+  if (!el('detailView').hidden && state.currentDetail) {
+    const { type, id } = state.currentDetail;
+    const list = type === 'movie' ? state.movies : state.series;
+    const item = list.find((it) => it.id === id);
+    if (item) {
+      if (type === 'movie') openMovieDetail(item); else openSeriesDetail(item);
+      return;
+    }
+  }
+  if (state.activeTab === 'mylist') { renderMyList(); return; }
+  renderActiveTab();
+}
+
 function posterOrFallback(item) {
   const inner = item.posterUrl
     ? `<img class="poster" src="${item.posterUrl}" alt="${escapeHtml(item.title)}" loading="lazy" />`
@@ -245,14 +322,21 @@ function renderHero(heroEl, item, onPlay, onMoreInfo) {
 const STAGGER_CAP = 12;
 
 // Sort modes available per shelf - series has no single "year" field (only
-// per-episode air dates), so it only offers Title/Rating.
-const SORT_LABELS = { title: 'Title A–Z', year: 'Year: Newest', rating: 'Rating: Highest' };
+// per-episode air dates), so it only offers Title/Rating. My List sorts by
+// your own activity/opinion (recently updated, my rating), not TMDB's.
+const SORT_LABELS = {
+  title: 'Title A–Z', year: 'Year: Newest', rating: 'Rating: Highest',
+  recent: 'Recently Updated', myRating: 'My Rating'
+};
 const MOVIE_SORT_MODES = ['title', 'year', 'rating'];
 const SERIES_SORT_MODES = ['title', 'rating'];
+const MYLIST_SORT_MODES = ['recent', 'title', 'myRating'];
 const SORTERS = {
   title: (a, b) => a.title.localeCompare(b.title),
   year: (a, b) => (b.year || 0) - (a.year || 0),
-  rating: (a, b) => (b.rating || 0) - (a.rating || 0)
+  rating: (a, b) => (b.rating || 0) - (a.rating || 0),
+  recent: (a, b) => new Date((b.progress && b.progress.updatedAt) || 0) - new Date((a.progress && a.progress.updatedAt) || 0),
+  myRating: (a, b) => ((b.progress && b.progress.rating) || 0) - ((a.progress && a.progress.rating) || 0)
 };
 
 // Filters `items` by title against `query`, sorts by `sortMode`, and returns
@@ -265,7 +349,12 @@ function visibleItems(items, query, sortMode) {
 }
 
 function makeCardClickable(card, onActivate) {
-  card.addEventListener('click', onActivate);
+  card.addEventListener('click', (e) => {
+    // An inner action button (rating stars, edit/trash) handles its own click -
+    // without this a star click would bubble up and also open the detail view.
+    if (e.target.closest('button')) return;
+    onActivate();
+  });
   card.addEventListener('keydown', (e) => {
     if (e.target.closest('button')) return; // let an inner action button (edit/trash) handle its own Enter/Space
     if (e.key === 'Enter' || e.key === ' ') {
@@ -360,6 +449,72 @@ function renderSeries() {
   `).join('');
   grid.querySelectorAll('[data-series-index]').forEach((card) => {
     makeCardClickable(card, () => openSeriesDetail(state.seriesVisible[card.dataset.seriesIndex]));
+  });
+}
+
+// --- My List: everything with progress or a personal rating, movies and
+// individual episodes together, across both shelves. ---
+
+function computeWatchlist() {
+  const items = [];
+  for (const m of state.movies) {
+    const p = state.progress[m.filePath];
+    if (p && (p.watched || p.percent > 0)) {
+      items.push({
+        type: 'movie', title: m.title, subtitle: m.year ? String(m.year) : '',
+        posterUrl: m.posterUrl, filePath: m.filePath, progress: p, ref: m
+      });
+    }
+  }
+  for (const s of state.series) {
+    for (const season of s.seasons) {
+      for (const ep of season.episodes) {
+        if (ep.upcoming || !ep.filePath) continue;
+        const p = state.progress[ep.filePath];
+        if (p && (p.watched || p.percent > 0)) {
+          const label = `S${ep.season ?? '?'} E${String(ep.episode ?? 0).padStart(2, '0')}`;
+          items.push({
+            type: 'episode', title: s.title, subtitle: `${label} · ${ep.title}`,
+            posterUrl: s.posterUrl, filePath: ep.filePath, progress: p, ref: s
+          });
+        }
+      }
+    }
+  }
+  return items;
+}
+
+function renderMyList() {
+  el('mylistSortBtn').textContent = `Sort: ${SORT_LABELS[state.mylistSort]}`;
+
+  const all = computeWatchlist();
+  const grid = el('mylistGrid');
+  if (!all.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('play')}</div>Nothing here yet - play something and it'll show up as you watch.</div>`;
+    state.mylistVisible = [];
+    return;
+  }
+  const visible = visibleItems(all, state.mylistFilter, state.mylistSort);
+  state.mylistVisible = visible;
+  if (!visible.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('play')}</div>No matches for "${escapeHtml(state.mylistFilter.trim())}".</div>`;
+    return;
+  }
+  grid.innerHTML = visible.map((it, i) => `
+    <div class="card" tabindex="0" role="button" aria-label="${escapeHtml(it.title)}" style="--i:${Math.min(i, STAGGER_CAP)}" data-mylist-index="${i}">
+      ${posterOrFallback(it)}
+      <div class="card-meta">
+        <div class="card-title">${escapeHtml(it.title)}</div>
+        <div class="card-sub">${escapeHtml(it.subtitle)}</div>
+        ${it.progress.watched ? starRatingHtml(it.filePath, it.progress.rating) : ''}
+      </div>
+    </div>
+  `).join('');
+  grid.querySelectorAll('[data-mylist-index]').forEach((card) => {
+    makeCardClickable(card, () => {
+      const it = state.mylistVisible[card.dataset.mylistIndex];
+      if (it.type === 'movie') openMovieDetail(it.ref); else openSeriesDetail(it.ref);
+    });
   });
 }
 
@@ -467,6 +622,17 @@ function openMovieDetail(movie) {
     }
   };
 
+  // Rating is most meaningful once you've actually finished it, so it only
+  // appears after Mark Watched (automatic or manual) - not shown at all
+  // beforehand rather than a disabled row nobody can use yet.
+  const ratingRow = el('detailRatingRow');
+  if (isWatched) {
+    ratingRow.hidden = false;
+    ratingRow.innerHTML = `<span class="detail-rating-label">Your Rating</span>${starRatingHtml(movie.filePath, state.progress[movie.filePath].rating)}`;
+  } else {
+    ratingRow.hidden = true;
+  }
+
   const deleteBtn = el('detailDeleteBtn');
   deleteBtn.hidden = false;
   deleteBtn.onclick = () => {
@@ -534,9 +700,10 @@ function openSeriesDetail(series) {
   } else {
     el('detailPlayBtn').hidden = true;
   }
-  // No single file to toggle at the series level - watched is set per episode
-  // in the list below.
+  // No single file to toggle or rate at the series level - both are set per
+  // episode in the list below.
   el('detailWatchedBtn').hidden = true;
+  el('detailRatingRow').hidden = true;
 
   // Shuffle-watch: only worth offering once there's more than one downloaded
   // episode to actually pick from.
@@ -591,6 +758,11 @@ function openSeriesDetail(series) {
             <div class="episode-title">${escapeHtml(ep.title)}</div>
             ${ep.overview ? `<div class="episode-overview">${escapeHtml(ep.overview)}</div>` : ''}
             ${ep.airDate || ep.rating ? `<div class="episode-sub">${[ratingHtml(ep.rating), ep.airDate ? escapeHtml(formatDate(ep.airDate)) : null].filter(Boolean).join('<span class="dot"></span>')}</div>` : ''}
+            ${(() => {
+              const p = state.progress[ep.filePath];
+              if (!p || !p.watched) return '';
+              return `<div class="episode-my-rating">${starRatingHtml(ep.filePath, p.rating)}</div>`;
+            })()}
           </div>
           <div class="episode-actions">
             ${(() => {
@@ -679,15 +851,12 @@ async function playFile(filePath, startTime) {
 // --- Chrome: tabs, back, settings, rescan ---
 
 function renderActiveTab() {
-  if (state.activeTab === 'movies') {
-    el('moviesView').hidden = false;
-    el('seriesView').hidden = true;
-    renderMovies();
-  } else {
-    el('moviesView').hidden = true;
-    el('seriesView').hidden = false;
-    renderSeries();
-  }
+  el('moviesView').hidden = state.activeTab !== 'movies';
+  el('seriesView').hidden = state.activeTab !== 'series';
+  el('mylistView').hidden = state.activeTab !== 'mylist';
+  if (state.activeTab === 'movies') renderMovies();
+  else if (state.activeTab === 'series') renderSeries();
+  else renderMyList();
 }
 
 // On first load only: reopen whichever tab (and detail, if any) was open the
@@ -696,7 +865,7 @@ function renderActiveTab() {
 // nothing stored, or if the stored item no longer exists in the library.
 function restoreLastView() {
   const last = loadLastView();
-  if (last && (last.tab === 'movies' || last.tab === 'series') && last.tab !== state.activeTab) {
+  if (last && (last.tab === 'movies' || last.tab === 'series' || last.tab === 'mylist') && last.tab !== state.activeTab) {
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === last.tab));
     state.activeTab = last.tab;
   }
@@ -985,6 +1154,15 @@ function setupShelfControls() {
     state.seriesSort = SERIES_SORT_MODES[(i + 1) % SERIES_SORT_MODES.length];
     renderSeries();
   });
+  el('mylistSearchInput').addEventListener('input', (e) => {
+    state.mylistFilter = e.target.value;
+    renderMyList();
+  });
+  el('mylistSortBtn').addEventListener('click', () => {
+    const i = MYLIST_SORT_MODES.indexOf(state.mylistSort);
+    state.mylistSort = MYLIST_SORT_MODES[(i + 1) % MYLIST_SORT_MODES.length];
+    renderMyList();
+  });
 }
 
 // Arrow-key navigation across poster grids and episode lists, extending the
@@ -1055,4 +1233,5 @@ setupRetryLoad();
 setupModalDismissal();
 setupShelfControls();
 setupKeyboardGridNav();
+setupStarRatingDelegation();
 fetchLibrary();
