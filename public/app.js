@@ -118,6 +118,11 @@ async function fetchLibrary() {
   el('loadError').hidden = true;
   el('moviesView').hidden = true;
   el('seriesView').hidden = true;
+  el('loadingHint').hidden = true;
+  // A big library (or a first scan with a cold TMDB cache) can take a while -
+  // reassure after a few seconds instead of leaving a bare spinner up with no
+  // signal it's still working rather than stuck.
+  const hintTimer = setTimeout(() => { el('loadingHint').hidden = false; }, 6000);
   try {
     const [libRes, progressRes] = await Promise.all([
       fetch('/api/library'),
@@ -131,6 +136,10 @@ async function fetchLibrary() {
     state.movies = data.movies;
     state.series = data.series;
     state.tmdbConfigured = data.tmdbConfigured;
+    state.moviesPath = data.moviesPath;
+    state.seriesPath = data.seriesPath;
+    state.moviesPathExists = data.moviesPathExists !== false;
+    state.seriesPathExists = data.seriesPathExists !== false;
     state.progress = progressRes ? await progressRes.json().catch(() => ({})) : {};
     el('loading').hidden = true;
     if (didRestoreView) {
@@ -145,6 +154,9 @@ async function fetchLibrary() {
     el('loading').hidden = true;
     el('loadErrorMessage').textContent = `Could not load your library: ${err.message}`;
     el('loadError').hidden = false;
+  } finally {
+    clearTimeout(hintTimer);
+    el('loadingHint').hidden = true;
   }
 }
 
@@ -263,6 +275,20 @@ function makeCardClickable(card, onActivate) {
   });
 }
 
+// A missing folder (typo'd Settings path, unmounted drive) and a genuinely
+// empty one both scan to zero items - this tells them apart so a config
+// mistake doesn't just look like "you have no movies," with a direct way to
+// fix it instead of a dead end.
+function missingFolderHtml(iconName, label, folderPath) {
+  return `
+    <div class="empty-state">
+      <div class="empty-state-icon">${icon(iconName)}</div>
+      <p>${escapeHtml(label)} folder not found.</p>
+      <p class="empty-state-path">${escapeHtml(folderPath || '')}</p>
+      <button type="button" class="pill-btn primary empty-state-settings-btn">Open Settings</button>
+    </div>`;
+}
+
 function renderMovies() {
   const hero = state.movies.find((m) => m.backdropUrl) || state.movies[0];
   renderHero(el('moviesHero'), hero, (m) => playFile(m.filePath), (m) => openMovieDetail(m));
@@ -271,7 +297,12 @@ function renderMovies() {
 
   const grid = el('moviesGrid');
   if (!state.movies.length) {
-    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('film')}</div>No movies found in the configured folder.</div>`;
+    if (!state.moviesPathExists) {
+      grid.innerHTML = missingFolderHtml('film', 'Movies', state.moviesPath);
+      grid.querySelector('.empty-state-settings-btn')?.addEventListener('click', openSettingsModal);
+    } else {
+      grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('film')}</div>No movies found in the configured folder.</div>`;
+    }
     state.moviesVisible = [];
     return;
   }
@@ -303,7 +334,12 @@ function renderSeries() {
 
   const grid = el('seriesGrid');
   if (!state.series.length) {
-    grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('tv')}</div>No series found in the configured folder.</div>`;
+    if (!state.seriesPathExists) {
+      grid.innerHTML = missingFolderHtml('tv', 'Series', state.seriesPath);
+      grid.querySelector('.empty-state-settings-btn')?.addEventListener('click', openSettingsModal);
+    } else {
+      grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('tv')}</div>No series found in the configured folder.</div>`;
+    }
     state.seriesVisible = [];
     return;
   }
@@ -883,16 +919,20 @@ function setupTrash() {
   });
 }
 
+// Shared so the "folder not found" empty state can jump straight to Settings,
+// not just the topbar gear icon.
+async function openSettingsModal() {
+  const res = await fetch('/api/config');
+  const cfg = await res.json();
+  el('moviesPathInput').value = cfg.moviesPath;
+  el('seriesPathInput').value = cfg.seriesPath;
+  el('tmdbKeyInput').value = '';
+  el('tmdbKeyInput').placeholder = cfg.tmdbConfigured ? 'key set (leave blank to keep)' : 'paste TMDB v3 API key';
+  openModal(el('settingsModal'));
+}
+
 function setupSettings() {
-  el('settingsBtn').addEventListener('click', async () => {
-    const res = await fetch('/api/config');
-    const cfg = await res.json();
-    el('moviesPathInput').value = cfg.moviesPath;
-    el('seriesPathInput').value = cfg.seriesPath;
-    el('tmdbKeyInput').value = '';
-    el('tmdbKeyInput').placeholder = cfg.tmdbConfigured ? 'key set (leave blank to keep)' : 'paste TMDB v3 API key';
-    openModal(el('settingsModal'));
-  });
+  el('settingsBtn').addEventListener('click', openSettingsModal);
   el('closeSettings').addEventListener('click', () => closeModal(el('settingsModal')));
   el('clearCacheBtn').addEventListener('click', async () => {
     if (!confirm('Clear cached TMDB metadata? The next scan re-fetches everything fresh, which takes longer and uses more TMDB API calls.')) return;

@@ -125,6 +125,8 @@ main { padding: 0 0 60px; }
   padding: 22px 32px 0;
 }
 .skeleton-grid[hidden] { display: none; }
+.loading-hint { text-align: center; color: var(--text-dim); font-size: 13px; padding: 16px 32px 0; }
+.loading-hint[hidden] { display: none; }
 .skeleton-card {
   aspect-ratio: 2/3;
   border-radius: var(--card-radius);
@@ -320,6 +322,8 @@ main { padding: 0 0 60px; }
   color: var(--text-dim);
   background: linear-gradient(160deg, #2c2c2e, #1c1c1e);
   border-radius: var(--card-radius);
+  overflow: hidden;
+  overflow-wrap: break-word;
 }
 
 /* --- Watch progress: thin fill bar at the bottom of a poster/still, or a watched badge --- */
@@ -457,6 +461,8 @@ main { padding: 0 0 60px; }
   background: linear-gradient(160deg, #2c2c2e, #1c1c1e);
   border-radius: var(--card-radius);
   box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+  overflow: hidden;
+  overflow-wrap: break-word;
   flex-shrink: 0;
 }
 .detail-poster-fallback[hidden] { display: none; }
@@ -654,6 +660,16 @@ main { padding: 0 0 60px; }
 }
 .empty-state-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.6; }
 .empty-state .pill-btn { margin-top: 14px; }
+.empty-state p { margin: 4px 0; }
+.empty-state-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  opacity: 0.8;
+  word-break: break-all;
+  max-width: 60ch;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 .meta-rating { display: inline-flex; align-items: center; gap: 5px; }
 .meta-rating .icon-star { color: var(--text); font-size: 0.85em; }

@@ -269,7 +269,18 @@ app.get('/api/library', async (req, res) => {
       scanMovies(cfg, overrides),
       scanSeries(cfg, overrides)
     ]);
-    res.json({ movies, series, tmdbConfigured: Boolean(cfg.tmdbApiKey) });
+    // A missing folder (typo'd path, unmounted drive) scans to an empty list
+    // the same way a genuinely empty folder does - the client can't tell them
+    // apart without this, and "no movies found" is a much worse message than
+    // "this folder doesn't exist" when it's actually a config problem.
+    res.json({
+      movies, series,
+      tmdbConfigured: Boolean(cfg.tmdbApiKey),
+      moviesPath: cfg.moviesPath,
+      seriesPath: cfg.seriesPath,
+      moviesPathExists: fs.existsSync(cfg.moviesPath),
+      seriesPathExists: fs.existsSync(cfg.seriesPath)
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
