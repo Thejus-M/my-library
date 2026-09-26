@@ -153,28 +153,40 @@ async function scanSeries(cfg, overrides) {
       return seasonMetaCache.get(seasonNum);
     }
 
+    // A revival can be numbered "S14" by the release group (continuing the
+    // original show's total season count) while TMDB numbers the very same
+    // content "season 11" (continuing only the revival's own count) - same
+    // episodes, same episode numbers, just a different season number. When
+    // the local season number isn't one TMDB actually has, fall back to
+    // matching episodes into whichever season TMDB has currently airing (or,
+    // failing that, its latest) BY EPISODE NUMBER, so real titles/overviews/
+    // stills/ratings are still found. The local number stays the displayed
+    // label/grouping either way - filenames are ground truth for
+    // organization (PRODUCT.md); TMDB is only ever the data source.
+    const validSeasons = meta && Array.isArray(meta.seasonNumbers) ? meta.seasonNumbers : null;
+    const airingSeason = meta && meta.nextEpisodeToAir && meta.nextEpisodeToAir.season;
+    const fallbackSeasonNum = validSeasons && validSeasons.includes(airingSeason)
+      ? airingSeason
+      : (validSeasons && validSeasons.length ? Math.max(...validSeasons) : null);
+    // Which TMDB season a given *local* season number actually pulls episode
+    // data from - itself if TMDB has it, else the fallback above.
+    function dataSourceFor(localSeasonNum) {
+      if (!validSeasons) return localSeasonNum;
+      return validSeasons.includes(localSeasonNum) ? localSeasonNum : fallbackSeasonNum;
+    }
+
     const buildSeason = async (label, number, dirForFiles) => {
       const files = listDir(dirForFiles).filter(
         (e) => e.isFile() && isVideoFile(e.name, cfg.videoExtensions)
       );
 
-      // Filenames are ground truth, TMDB metadata is decoration (see
-      // PRODUCT.md) - the season number always comes from an explicit
-      // override, else the filename's own SxxEyy, else the folder. TMDB is
-      // only consulted for *metadata about* that season (title/overview/
-      // still/rating); if TMDB doesn't have a season by that number at all
-      // (a revival a scene group numbers differently than TMDB does, e.g.
-      // continuing the classic show's count instead of restarting), the
-      // lookup below just comes back empty and each episode falls back to
-      // its filename-parsed title, same as any other unmatched title in this
-      // app - it does NOT get silently renumbered to whatever TMDB calls it.
       const episodes = [];
       for (const f of files) {
         const ep = parse.parseEpisodeFilename(f.name);
         const epOverride = overrides.episodes[f.name];
         const seasonNum = (epOverride && epOverride.season) || ep.season || number;
         const episodeNum = (epOverride && epOverride.episode) || ep.episode;
-        const seasonMeta = await getSeasonMeta(seasonNum);
+        const seasonMeta = await getSeasonMeta(dataSourceFor(seasonNum));
         const epMeta = seasonMeta && seasonMeta.episodes.find((e) => e.episode === episodeNum);
         episodes.push({
           id: f.name,
@@ -218,21 +230,22 @@ async function scanSeries(cfg, overrides) {
 
     // The next episode TMDB says is coming, shown even before you've downloaded
     // it - only for shows still airing, and only if you don't already have it.
-    // Only attaches to a season number you already have locally - if TMDB's
-    // season count for the show doesn't line up with how your files are
-    // numbered (e.g. a revival a scene group numbers differently than TMDB
-    // does), we have no reliable way to map TMDB's season onto yours, so we
-    // skip showing the upcoming placeholder rather than inventing a second,
-    // mismatched season block for it.
+    // Attaches to whichever local season is actually sourcing its episode data
+    // from the TMDB season the upcoming episode belongs to (matched the same
+    // way buildSeason() matches downloaded episodes - by episode number, via
+    // dataSourceFor()) - not by a literal season-number match, since the
+    // local season number and TMDB's for the same content can legitimately
+    // differ (see dataSourceFor above). If no local season maps to it at all,
+    // skip rather than inventing a mismatched new block.
     if (meta && !meta.ended && meta.nextEpisodeToAir) {
       const next = meta.nextEpisodeToAir;
-      const alreadyHave = seasons.some((s) => s.episodes.some((e) => e.season === next.season && e.episode === next.episode));
-      const targetSeason = seasons.find((s) => s.number === next.season);
-      if (!alreadyHave && targetSeason) {
+      const targetSeason = seasons.find((s) => dataSourceFor(s.number) === next.season);
+      const alreadyHave = targetSeason && targetSeason.episodes.some((e) => e.episode === next.episode);
+      if (targetSeason && !alreadyHave) {
         targetSeason.episodes.push({
           id: null,
           filePath: null,
-          season: next.season,
+          season: targetSeason.number,
           episode: next.episode,
           title: next.name || `Episode ${next.episode}`,
           overview: null,
