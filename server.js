@@ -666,7 +666,7 @@ app.post('/api/play', (req, res) => {
 // applied to every file.
 app.post('/api/play-playlist', (req, res) => {
   const cfg = loadConfig();
-  const { filePaths } = req.body || {};
+  const { filePaths, startTime } = req.body || {};
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     return res.status(400).json({ error: 'filePaths required' });
   }
@@ -685,7 +685,14 @@ app.post('/api/play-playlist', (req, res) => {
 
   const port = 9880 + Math.floor(Math.random() * 100);
   const token = crypto.randomBytes(8).toString('hex');
-  const args = ['--extraintf', 'http', '--http-host', '127.0.0.1', '--http-port', String(port), '--http-password', token, ...resolved];
+  const args = ['--extraintf', 'http', '--http-host', '127.0.0.1', '--http-port', String(port), '--http-password', token];
+  // A ":option=value" argument immediately after an MRL applies only to that
+  // one playlist item in VLC, not the whole invocation - lets the playlist
+  // start already resumed at its first item without affecting the rest.
+  resolved.forEach((r, i) => {
+    args.push(r);
+    if (i === 0 && startTime && Number(startTime) > 0) args.push(`:start-time=${Math.floor(Number(startTime))}`);
+  });
 
   const child = spawn('vlc', args, { detached: true, stdio: 'ignore' });
   child.unref();
