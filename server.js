@@ -211,7 +211,13 @@ async function scanSeries(cfg, overrides) {
       const effectiveNumber = seasonNumbers.size === 1 ? [...seasonNumbers][0] : number;
       const effectiveLabel = seasonNumbers.size === 1 ? `Season ${effectiveNumber}` : label;
 
-      return { label: effectiveLabel, number: effectiveNumber, episodes };
+      // Season's own poster (falls back to the series poster client-side when
+      // TMDB has none for this specific season, e.g. a season 1 before TMDB
+      // started tracking per-season art).
+      const posterSeasonMeta = await getSeasonMeta(dataSourceFor(effectiveNumber));
+      const posterUrl = (posterSeasonMeta && posterSeasonMeta.posterUrl) || null;
+
+      return { label: effectiveLabel, number: effectiveNumber, posterUrl, episodes };
     };
 
     for (const seasonDir of seasonEntries) {
@@ -443,6 +449,32 @@ async function pollVlcStatus(port, token) {
   return res.json();
 }
 
+async function pollVlcPlaylist(port, token) {
+  const res = await fetch(`http://127.0.0.1:${port}/requests/playlist.json`, {
+    headers: { Authorization: vlcAuthHeader(token) },
+    signal: AbortSignal.timeout(2000)
+  });
+  if (!res.ok) throw new Error(`vlc http ${res.status}`);
+  return res.json();
+}
+
+// VLC's playlist.json is a tree (root -> a "Playlist" folder node -> the
+// actual queued items); walk it for every leaf (a node with a `uri`, no
+// `children`) regardless of nesting depth.
+function flattenPlaylistItems(node, out) {
+  out = out || [];
+  if (node.children) {
+    for (const child of node.children) flattenPlaylistItems(child, out);
+  } else if (node.uri) {
+    out.push(node);
+  }
+  return out;
+}
+
+function uriToPath(uri) {
+  try { return decodeURIComponent(new URL(uri).pathname); } catch { return null; }
+}
+
 function finalizeProgress(filePath, time, length) {
   const progress = loadProgress();
   if (length > 0) {
@@ -488,6 +520,58 @@ function trackPlayback(filePath, port, token, child) {
     clearInterval(pollTimer);
     activeSessions.delete(filePath);
     finalizeProgress(filePath, lastTime, lastLength);
+  });
+}
+
+// Same idea as trackPlayback, but for a whole queued playlist: VLC reports
+// one shared time/length for whichever item is currently playing, so each
+// tick we also ask which playlist item that is (status.currentplid, matched
+// against playlist.json's flattened items by uri) and attribute the
+// progress to THAT file - letting progress naturally roll from episode to
+// episode as VLC advances through the queue instead of all piling onto the
+// first file.
+function trackPlaylistPlayback(filePaths, port, token, child) {
+  const known = new Set(filePaths);
+  let currentPath = filePaths[0];
+  let lastTime = 0;
+  let lastLength = 0;
+
+  async function currentItemPath() {
+    const [status, playlist] = await Promise.all([pollVlcStatus(port, token), pollVlcPlaylist(port, token)]);
+    const items = flattenPlaylistItems(playlist);
+    const active = items.find((it) => Number(it.id) === Number(status.currentplid));
+    const activePath = active ? uriToPath(active.uri) : null;
+    return { status, path: activePath && known.has(activePath) ? activePath : null };
+  }
+
+  const pollTimer = setInterval(async () => {
+    try {
+      const { status, path: activePath } = await currentItemPath();
+      if (activePath) currentPath = activePath;
+      lastTime = status.time || 0;
+      lastLength = status.length || 0;
+      finalizeProgress(currentPath, lastTime, lastLength);
+    } catch {
+      // VLC's http interface may not be up yet, or the window was closed
+      // mid-poll - either way, just try again next tick.
+    }
+  }, 3000);
+
+  activeSessions.set(filePaths[0], { pollTimer, filePaths });
+
+  child.on('exit', async () => {
+    try {
+      const { status, path: activePath } = await currentItemPath();
+      if (activePath) currentPath = activePath;
+      lastTime = status.time || 0;
+      lastLength = status.length || 0;
+    } catch {
+      // VLC's http server is already gone by the time it exits - use the
+      // last value we polled while it was still running.
+    }
+    clearInterval(pollTimer);
+    activeSessions.delete(filePaths[0]);
+    finalizeProgress(currentPath, lastTime, lastLength);
   });
 }
 
@@ -571,6 +655,45 @@ app.post('/api/play', (req, res) => {
     trackPlayback(resolved, port, token, child);
   } catch (err) {
     console.error('Watch-progress tracking failed to start (playback continues normally):', err.message);
+  }
+
+  res.json({ ok: true });
+});
+
+// Play a whole list of files (e.g. a season's episodes) as one VLC playlist,
+// in the given order, so Next/Previous moves between them without
+// re-opening the app per episode. Same library-root check as /api/play,
+// applied to every file.
+app.post('/api/play-playlist', (req, res) => {
+  const cfg = loadConfig();
+  const { filePaths } = req.body || {};
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return res.status(400).json({ error: 'filePaths required' });
+  }
+
+  const resolved = [];
+  for (const filePath of filePaths) {
+    const r = path.resolve(filePath);
+    if (!isInsideLibrary(cfg, r)) {
+      return res.status(403).json({ error: 'File is outside configured library folders' });
+    }
+    if (!fs.existsSync(r)) {
+      return res.status(404).json({ error: `File not found: ${filePath}` });
+    }
+    resolved.push(r);
+  }
+
+  const port = 9880 + Math.floor(Math.random() * 100);
+  const token = crypto.randomBytes(8).toString('hex');
+  const args = ['--extraintf', 'http', '--http-host', '127.0.0.1', '--http-port', String(port), '--http-password', token, ...resolved];
+
+  const child = spawn('vlc', args, { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  try {
+    trackPlaylistPlayback(resolved, port, token, child);
+  } catch (err) {
+    console.error('Watch-progress tracking failed to start for playlist (playback continues normally):', err.message);
   }
 
   res.json({ ok: true });
