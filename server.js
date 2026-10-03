@@ -647,6 +647,10 @@ app.post('/api/play', (req, res) => {
   const args = [];
   if (startTime && Number(startTime) > 0) args.push(`--start-time=${Math.floor(Number(startTime))}`);
   args.push('--extraintf', 'http', '--http-host', '127.0.0.1', '--http-port', String(port), '--http-password', token, resolved);
+  // Explicit rather than relying on VLC's own same-name-sidecar autodetect -
+  // see the matching comment in /api/play-playlist.
+  const sidecarSrt = resolved.replace(/\.[^.]+$/, '.srt');
+  if (fs.existsSync(sidecarSrt)) args.push(`:sub-file=${sidecarSrt}`);
 
   const child = spawn('vlc', args, { detached: true, stdio: 'ignore' });
   child.unref();
@@ -692,6 +696,12 @@ app.post('/api/play-playlist', (req, res) => {
   resolved.forEach((r, i) => {
     args.push(r);
     if (i === 0 && startTime && Number(startTime) > 0) args.push(`:start-time=${Math.floor(Number(startTime))}`);
+    // VLC only auto-detects a same-name sidecar .srt for the FIRST item it
+    // opens - advancing to a later playlist item internally skips that
+    // detection pass, silently dropping the subtitle. Attaching it
+    // explicitly per item survives that transition.
+    const sidecarSrt = r.replace(/\.[^.]+$/, '.srt');
+    if (fs.existsSync(sidecarSrt)) args.push(`:sub-file=${sidecarSrt}`);
   });
 
   const child = spawn('vlc', args, { detached: true, stdio: 'ignore' });
